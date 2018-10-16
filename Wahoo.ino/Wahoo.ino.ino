@@ -23,12 +23,12 @@ int sensi=950;//Set the sensitivity of the laser string(tone) R1 pin
 char totalValue = 0;
 
 struct SquareGenerator {
-  SquareGenerator():volume(0), value(0){}
+  SquareGenerator():volume(0), phase(0), value(0){}
   unsigned short int period;
   char volume;
   char phase;
   char value;
-  unsigned short counter;
+  unsigned short int counter;
   void counterInc() {counter++;}
   char getValue()
   {
@@ -37,7 +37,7 @@ struct SquareGenerator {
       if (phase == 0)
         value = volume;
       else
-        value = -127;
+        value = -volume;
       phase = !phase;
       counter = 0;
     }
@@ -45,7 +45,7 @@ struct SquareGenerator {
   }
 };
 
-SquareGenerator squareGenerator;
+SquareGenerator squareGenerator[2];
 
 void setup()
 {
@@ -58,7 +58,6 @@ void setup()
   pinMode(buttonPin2, INPUT);//Set D4 pin to input mode
   pinMode(laserPin,OUTPUT);//Set the D12 pin to output mode
   digitalWrite(laserPin,HIGH);// Turn on the lasers !
-  squareGenerator.phase = 0;
 }
 
 void loop()
@@ -73,18 +72,30 @@ void loop()
 
   if (val < sensi)
   {
-    squareGenerator.period = 20000 / 880;
-    squareGenerator.volume = 127;
+    squareGenerator[0].period = 20000 / 880;
+    squareGenerator[0].volume = 63;
   }
   else 
   {
-    if (squareGenerator.volume > -127)
+    if (squareGenerator[0].volume > 0)
     {
-      squareGenerator.volume--;
-      delay(10);
+      squareGenerator[0].volume--;
     }
-    
   }
+  
+  if (val2 < sensi)
+  {
+    squareGenerator[1].period = 20000 / 750;
+    squareGenerator[1].volume = 63;
+  }
+  else 
+  {
+    if (squareGenerator[1].volume > 0)
+    {
+      squareGenerator[1].volume--;
+    }
+  }
+  delay(3);
 }
 
 /// --------------------------
@@ -92,7 +103,8 @@ void loop()
 /// --------------------------
 void timerIsr()
 {
-  Timer1.setPwmDuty(beep, totalValue);
-  squareGenerator.counterInc();
-  totalValue = squareGenerator.getValue();
+  Timer1.setPwmDuty(beep, (((int)totalValue) + 128) << 2);
+  squareGenerator[0].counterInc();
+  squareGenerator[1].counterInc();  
+  totalValue = squareGenerator[0].getValue() + squareGenerator[1].getValue();
 }
