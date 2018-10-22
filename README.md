@@ -1,5 +1,4 @@
 # Laser Harp
----
 
 ---
 *IMPORTANT*
@@ -16,7 +15,6 @@ So the final stable version we're aiming for is :
 5. Add an arpeggiator mode
 
 # How it's done
----
 
 We are using the Timer1 library so we can use the PWM duty cycle inside an interuption to generate a wave on the pin 9.
 
