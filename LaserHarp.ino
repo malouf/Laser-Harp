@@ -6,6 +6,7 @@ int laserPin = 12; // The transistor that controls the laser on and off is conne
 int sensi = 950; // Set the sensitivity of the laser string(tone) R1 pin
 const unsigned short int sampleRate = 20000;
 char totalValue = 0;
+char filterValue = 0;
 const int buttonsPin[3] =
 {
   2,
@@ -164,6 +165,7 @@ struct PwmGenerator
   {
     periodHigh = periodMin;
     periodLow = newPeriod - periodMin;
+    sweepPhase = 0;
   }
 };
 
@@ -253,6 +255,11 @@ void changeMode()
     currentScale++;
     if (currentScale >= scaleCount)
       currentScale = 0;
+    for (int i = 0; i < 7; ++i)
+    {
+      squareGenerator[i].setPeriod(periods[currentScale][i]);
+      pwmGenerator[i].setPeriod(periods[currentScale][i]);
+    }
   }
 }
 
@@ -278,7 +285,6 @@ void loopPwm()
 {
   for (int i = 0; i < 7; ++i)
   {
-    pwmGenerator[i].setPeriod(periods[currentScale][i]);
     pwmGenerator[i].pwmSweep();
     if (lasersHold[i])
     {
@@ -314,22 +320,30 @@ void loop()
 // --------------------------
 void timerIsrSquare()
 {
-  Timer1.setPwmDuty(beep,(((int) totalValue) + 128) << 2);
+  Timer1.setPwmDuty(beep,(((int) filterValue) + 128) << 2);
   totalValue = 0;
   for (int i = 0; i < 7; ++i)
   {
     squareGenerator[i].counterInc();
     totalValue += squareGenerator[i].getValue();
   }
+
+  // Add a simple 1st order filter to have a less harsh square sound
+  filterValue >>= 1;
+  filterValue = filterValue + totalValue >> 1;
 }
 
 void timerIsrPwm()
 {
-  Timer1.setPwmDuty(beep,(((int) totalValue) + 128) << 2);
+  Timer1.setPwmDuty(beep,(((int) filterValue) + 128) << 2);
   totalValue = 0;
   for (int i = 0; i < 7; ++i)
   {
     pwmGenerator[i].counterInc();
     totalValue += pwmGenerator[i].getValue();
   }
+
+  // Add a simple 1st order filter to have a less harsh square sound
+  filterValue >>= 1;
+  filterValue = filterValue + totalValue >> 1;
 }
