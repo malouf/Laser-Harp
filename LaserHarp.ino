@@ -24,16 +24,32 @@ const int lasersPin[7] =
   7
 };
 
-const unsigned char periods[7] =
+const unsigned char periods[2][7] =
 {
-  sampleRate / 380,
-  sampleRate / 445,
-  sampleRate / 505,
-  sampleRate / 590,
-  sampleRate / 668,
-  sampleRate / 745,
-  sampleRate / 880
+  {
+    // Guqin strings
+    sampleRate / 380,
+    sampleRate / 445,
+    sampleRate / 505,
+    sampleRate / 590,
+    sampleRate / 668,
+    sampleRate / 745,
+    sampleRate / 880
+  },
+  {
+    // A Blues scale
+    sampleRate / 445,
+    sampleRate / 505,
+    sampleRate / 590,
+    sampleRate / 620,
+    sampleRate / 668,
+    sampleRate / 745,
+    sampleRate / 880
+  },
 };
+
+const unsigned char scaleCount = sizeof(periods) / sizeof(periods[0]);
+unsigned char currentScale = 0;
 
 struct SquareGenerator
 {
@@ -73,7 +89,7 @@ struct SquareGenerator
   }
   void slidePeriod(unsigned char targetPeriod)
   {
-    if ( (targetPeriod >= period - 1) ||
+    if ( (targetPeriod >= period - 2) ||
          (targetPeriod <= period + 1) )
       period = targetPeriod; // Stable value: use exact period
     else
@@ -144,6 +160,11 @@ struct PwmGenerator
     }
     return value;
   }
+  void setPeriod(unsigned char newPeriod)
+  {
+    periodHigh = periodMin;
+    periodLow = newPeriod - periodMin;
+  }
 };
 
 SquareGenerator squareGenerator[7];
@@ -160,8 +181,8 @@ void setup()
 {
   for (int i = 0; i < 7; ++i)
   {
-    squareGenerator[i].init(periods[i]);
-    pwmGenerator[i].init(periods[i]);
+    squareGenerator[i].init(periods[currentScale][i]);
+    pwmGenerator[i].init(periods[currentScale][i]);
   }
   for (int i = 0; i < 3; ++i)
     pinMode(buttonsPin[i], INPUT);
@@ -226,6 +247,13 @@ void changeMode()
         break;
     }
   }
+
+  if (buttonsPressed[1])
+  {
+    currentScale++;
+    if (currentScale >= scaleCount)
+      currentScale = 0;
+  }
 }
 
 void loopSquare()
@@ -240,9 +268,9 @@ void loopSquare()
         squareGenerator[i].volume--;
 
     if (tilted)
-      squareGenerator[i].slidePeriod(periods[i]/2); // Slide to octave up when tilted
+      squareGenerator[i].slidePeriod(periods[currentScale][i]/2); // Slide to octave up when tilted
     else
-      squareGenerator[i].slidePeriod(periods[i]);
+      squareGenerator[i].slidePeriod(periods[currentScale][i]);
   }
 }
 
@@ -250,6 +278,7 @@ void loopPwm()
 {
   for (int i = 0; i < 7; ++i)
   {
+    pwmGenerator[i].setPeriod(periods[currentScale][i]);
     pwmGenerator[i].pwmSweep();
     if (lasersHold[i])
     {
