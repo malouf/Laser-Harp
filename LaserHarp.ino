@@ -1,24 +1,31 @@
 #include <TimerOne.h>
 
 int beep = 9;
-int buttonPin = 2; //Button 1 is connected to the D2 pin
-int buttonPin1 = 3;//Button 2 is connected to the D3 pin
-int buttonPin2 = 4;//Button 3 is connected to the D4 pin
-int laserPin=12;//The transistor that controls the laser on and off is connected to the D12 pin
-int sensi=950;//Set the sensitivity of the laser string(tone) R1 pin
+int tilt=13; // Tilt switch pin
+int laserPin = 12; // The transistor that controls the laser on and off is connected to the D12 pin
+int sensi = 950; // Set the sensitivity of the laser string(tone) R1 pin
 const unsigned short int sampleRate = 20000;
 char totalValue = 0;
-const int lasersPin[7] = {
- A0,
- A1,
- A2,
- A3,
- A4,
- A5,
- 7
+const int buttonsPin[3] =
+{
+  2,
+  3,
+  4  
 };
 
-const unsigned short int periods[7] = {
+const int lasersPin[7] =
+{
+  A0,
+  A1,
+  A2,
+  A3,
+  A4,
+  A5,
+  7
+};
+
+const unsigned short int periods[7] =
+{
   sampleRate / 380,
   sampleRate / 445,
   sampleRate / 505,
@@ -28,7 +35,8 @@ const unsigned short int periods[7] = {
   sampleRate / 880
 };
 
-struct SquareGenerator {
+struct SquareGenerator
+{
   unsigned short int period;
   char volume;
   char phase;
@@ -37,12 +45,15 @@ struct SquareGenerator {
   void init(const unsigned short int newPeriod)
   {
     volume = 0;
-    value = 0;    
+    value = 0;
     phase = 0;
     period = newPeriod;
     counter = 0;
   }
-  void counterInc() {counter++;}
+  void counterInc()
+  {
+    counter++;
+  }
   char getValue()
   {
     if (counter >= period)
@@ -58,7 +69,8 @@ struct SquareGenerator {
   }
 };
 
-struct PwmGenerator {
+struct PwmGenerator
+{
   unsigned short int periodHigh;
   unsigned short int periodLow;
   char volume;
@@ -70,7 +82,7 @@ struct PwmGenerator {
   void init(const unsigned short int newPeriod)
   {
     volume = 0;
-    value = 0;    
+    value = 0;
     phase = 0;
     sweepPhase = 0;
     periodHigh = periodMin;
@@ -94,7 +106,10 @@ struct PwmGenerator {
         sweepPhase = 0;
     }
   }
-  void counterInc() {counter++;}
+  void counterInc()
+  {
+    counter++;
+  }
   char getValue()
   {
     if (phase == 0)
@@ -103,7 +118,7 @@ struct PwmGenerator {
       {
         phase = 1;
         value = volume;
-        counter = 0;        
+        counter = 0;
       }
     }
     else
@@ -123,6 +138,11 @@ SquareGenerator squareGenerator[7];
 PwmGenerator pwmGenerator[7];
 char lasersPressed[7];
 char lasersHold[7];
+char tilted;
+char buttonsPressed[3];
+char buttonsHold[3];
+typedef enum { PWM, SQUARE, STACCATO, ARPEGGIATOR } Modes;
+Modes mode;
 
 void setup()
 {
@@ -130,39 +150,78 @@ void setup()
   {
     squareGenerator[i].init(periods[i]);
     pwmGenerator[i].init(periods[i]);
-  }  
-  Timer1.initialize(50);              // initialize timer1 10KHz
-  Timer1.pwm(beep, 512);               // setup pwm on pin 9
-  Timer1.attachInterrupt(timerIsrPwm);   // attaches timerIsr() as a timer overflow interrupt
-  pinMode(7,INPUT);//Set the D7 pin to input mode
-  pinMode(buttonPin, INPUT);//Set D2 pin to input mode
-  pinMode(buttonPin1, INPUT);//Set D3 pin to input mode
-  pinMode(buttonPin2, INPUT);//Set D4 pin to input mode
-  pinMode(laserPin,OUTPUT);//Set the D12 pin to output mode
-  digitalWrite(laserPin,HIGH);// Turn on the lasers !
+  }
+  for (int i = 0; i < 3; ++i)
+    pinMode(buttonsPin[i], INPUT);
+  mode = PWM;
+  Timer1.initialize(50); // initialize timer1 10KHz
+  Timer1.pwm(beep, 512); // setup pwm on pin 9
+  Timer1.attachInterrupt(timerIsrPwm); // attaches timerIsr() as a timer overflow interrupt
+  pinMode(7, INPUT); // Set the D7 pin to input mode
+  pinMode(laserPin, OUTPUT); // Set the D12 pin to output mode
+  pinMode(tilt,INPUT);//Set D13 pin to input mode  
+  digitalWrite(laserPin, HIGH); // Turn on the lasers !
   delay(100);
-    Serial.begin(9600);
+  Serial.begin(9600);
 }
 
 void readInput()
 {
+  char newState;
+  // Lasers state
   for (int i = 0; i < 6; ++i)
   {
-    char newState = analogRead(lasersPin[i]) < sensi;
+    newState = analogRead(lasersPin[i]) < sensi;
     lasersPressed[i] = newState && !lasersHold[i];
     lasersHold[i] = newState;
   }
   // Since pin7 digital...
-  char newState = digitalRead(lasersPin[6]);
+  newState = digitalRead(lasersPin[6]);
   lasersPressed[6] = newState && !lasersHold[6];
   lasersHold[6] = newState;
+
+  // Buttons state
+  for (int i = 0; i < 3; ++i)
+  {
+    newState = digitalRead(buttonsPin[i]);
+    buttonsPressed[i] = newState && !buttonsHold[i];
+    buttonsHold[i] = newState;
+  }
+
+  // Tilt state
+  tilted = digitalRead(tilt);
+
+}
+
+void changeMode()
+{
+  if (buttonsPressed[0])
+  {
+    switch(mode) {
+      case PWM :
+        mode = SQUARE;
+        Timer1.attachInterrupt(timerIsrSquare);        
+        break;
+      case SQUARE :
+        mode = STACCATO;
+        Timer1.attachInterrupt(timerIsrSquare);
+        break;
+      case STACCATO :
+        mode = PWM;
+        Timer1.attachInterrupt(timerIsrPwm);        
+        break;
+      default :
+        break;
+    }
+  }
 }
 
 void loopSquare()
 {
   for (int i = 0; i < 7; ++i)
   {
-    if (lasersHold[i])
+    if ( (lasersHold[i] && mode == SQUARE) ||
+         (lasersPressed[i] && mode == STACCATO) )
       squareGenerator[i].volume = 127 / (sizeof(squareGenerator) / sizeof(squareGenerator[0]));
     else
       if (squareGenerator[i].volume > 0)
@@ -178,7 +237,7 @@ void loopPwm()
     if (lasersHold[i])
     {
       if (pwmGenerator[i].volume < 127 / (sizeof(pwmGenerator) / sizeof(pwmGenerator[0])))
-       pwmGenerator[i].volume++;
+        pwmGenerator[i].volume++;
     }
     else
       if (pwmGenerator[i].volume > 0)
@@ -189,17 +248,27 @@ void loopPwm()
 void loop()
 {
   readInput();
-  loopPwm();
-//if button loop square
+  changeMode();
+  switch(mode) {
+    case PWM :
+      loopPwm();
+      break;
+    case SQUARE :
+    case STACCATO :
+      loopSquare();
+      break;
+    default :
+    break;
+  }
   delay(15);
 }
 
-/// --------------------------
-/// Custom ISR Timer Routine
-/// --------------------------
+// --------------------------
+// Custom ISR Timer Routine
+// --------------------------
 void timerIsrSquare()
 {
-  Timer1.setPwmDuty(beep, (((int)totalValue) + 128) << 2);
+  Timer1.setPwmDuty(beep,(((int) totalValue) + 128) << 2);
   totalValue = 0;
   for (int i = 0; i < 7; ++i)
   {
@@ -210,7 +279,7 @@ void timerIsrSquare()
 
 void timerIsrPwm()
 {
-  Timer1.setPwmDuty(beep, (((int)totalValue) + 128) << 2);
+  Timer1.setPwmDuty(beep,(((int) totalValue) + 128) << 2);
   totalValue = 0;
   for (int i = 0; i < 7; ++i)
   {
