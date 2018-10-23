@@ -1,7 +1,7 @@
 #include <TimerOne.h>
 
 int beep = 9;
-int tilt=13; // Tilt switch pin
+int tilt = 13; // Tilt switch pin
 int laserPin = 12; // The transistor that controls the laser on and off is connected to the D12 pin
 int sensi = 950; // Set the sensitivity of the laser string(tone) R1 pin
 const unsigned short int sampleRate = 20000;
@@ -24,7 +24,7 @@ const int lasersPin[7] =
   7
 };
 
-const unsigned short int periods[7] =
+const unsigned char periods[7] =
 {
   sampleRate / 380,
   sampleRate / 445,
@@ -37,12 +37,12 @@ const unsigned short int periods[7] =
 
 struct SquareGenerator
 {
-  unsigned short int period;
+  unsigned char period;
   char volume;
   char phase;
   char value;
-  unsigned short int counter;
-  void init(const unsigned short int newPeriod)
+  unsigned char counter;
+  void init(const unsigned char newPeriod)
   {
     volume = 0;
     value = 0;
@@ -67,19 +67,31 @@ struct SquareGenerator
     }
     return value;
   }
+  void setPeriod(unsigned char newPeriod)
+  {
+    period = newPeriod;
+  }
+  void slidePeriod(unsigned char targetPeriod)
+  {
+    if ( (targetPeriod >= period - 1) ||
+         (targetPeriod <= period + 1) )
+      period = targetPeriod; // Stable value: use exact period
+    else
+      period = period >> 1 + targetPeriod >> 1; // Slide using an approximate 1st order filter
+  }
 };
 
 struct PwmGenerator
 {
-  unsigned short int periodHigh;
-  unsigned short int periodLow;
+  unsigned char periodHigh;
+  unsigned char periodLow;
   char volume;
   char phase;
   char sweepPhase;
   char value;
-  unsigned short int counter;
-  const unsigned short int periodMin = 5;
-  void init(const unsigned short int newPeriod)
+  unsigned char counter;
+  const unsigned char periodMin = 5;
+  void init(const unsigned char newPeriod)
   {
     volume = 0;
     value = 0;
@@ -226,6 +238,11 @@ void loopSquare()
     else
       if (squareGenerator[i].volume > 0)
         squareGenerator[i].volume--;
+
+    if (tilted)
+      squareGenerator[i].slidePeriod(periods[i]/2); // Slide to octave up when tilted
+    else
+      squareGenerator[i].slidePeriod(periods[i]);
   }
 }
 
