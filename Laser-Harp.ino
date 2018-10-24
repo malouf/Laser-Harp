@@ -1,12 +1,21 @@
 #include <TimerOne.h>
 
+int redPin = 5;  //Connect the R pin of the RGB LED to the D5 pin
+int greenPin = 6;//Connect the G pin of the RGB LED to the D6 pin
 int beep = 9;
 int tilt = 13; // Tilt switch pin
 int laserPin = 12; // The transistor that controls the laser on and off is connected to the D12 pin
 int sensi = 950; // Set the sensitivity of the laser string(tone) R1 pin
 const unsigned short int sampleRate = 20000;
 char totalValue = 0;
-char filterValue = 0;
+short int filterValue = 512;
+char lasersPressed[7];
+char lasersHold[7];
+char tilted;
+char buttonsPressed[3];
+char buttonsHold[3];
+typedef enum { PWM, SQUARE, STACCATO, ARPEGGIATOR } Modes;
+
 const int buttonsPin[3] =
 {
   2,
@@ -169,14 +178,60 @@ struct PwmGenerator
   }
 };
 
+struct Arpeggiator
+{
+  unsigned short int counter;
+  unsigned short int tempo;
+  unsigned short int lastTonePlayed;
+  unsigned short int toneToPlay;
+  char tonePlayed[7];
+  void resetToneToPlay() { toneToPlay = 10; }
+  void resetTonePlayed()
+  {
+    for (int i = 0; i < 7; ++i)
+      tonePlayed[i] = 0;
+    lastTonePlayed = 0;
+  }
+  void findNextToneToPlay()
+  {
+    // if mode == going up
+    for (int i = lastTonePlayed; i < 7; ++i)
+    {
+      if (lasersHold[i] && !tonePlayed[i])
+      {
+        toneToPlay = i;
+        break;
+      }
+    }
+    for (int i = lastTonePlayed; i < 7; ++i)
+    {
+      if (lasersHold[i] && !tonePlayed[i])
+        break;
+      if (i + 1 == 7)
+        resetTonePlayed();
+    }
+  }
+  void setTempo(unsigned char newTempo) {tempo = newTempo;}
+  void tempoInc()
+  {
+    tempo++;
+    if (tempo >= 20)
+      tempo = 7;
+  }
+  void counterInc() {counter++;}
+  void counterReset() {counter = 0;}
+  void init()
+  {
+    counter = 0;
+    tempo = 7;
+    resetTonePlayed();
+    resetToneToPlay();
+  }
+};
+
 SquareGenerator squareGenerator[7];
 PwmGenerator pwmGenerator[7];
-char lasersPressed[7];
-char lasersHold[7];
-char tilted;
-char buttonsPressed[3];
-char buttonsHold[3];
-typedef enum { PWM, SQUARE, STACCATO, ARPEGGIATOR } Modes;
+Arpeggiator arpeggiator;
 Modes mode;
 
 void setup()
@@ -187,17 +242,30 @@ void setup()
     pwmGenerator[i].init(periods[currentScale][i]);
   }
   for (int i = 0; i < 3; ++i)
+  {
     pinMode(buttonsPin[i], INPUT);
+    buttonsPressed[i] = 0;
+    buttonsHold[i] = 0;
+  }
+  arpeggiator.init();
   mode = PWM;
+  colorRG(255, 255); // Blue
   Timer1.initialize(50); // initialize timer1 10KHz
   Timer1.pwm(beep, 512); // setup pwm on pin 9
   Timer1.attachInterrupt(timerIsrPwm); // attaches timerIsr() as a timer overflow interrupt
-  pinMode(7, INPUT); // Set the D7 pin to input mode
+  pinMode(7, INPUT); // Set the laser D7 pin to input mode
   pinMode(laserPin, OUTPUT); // Set the D12 pin to output mode
-  pinMode(tilt,INPUT);//Set D13 pin to input mode  
+  pinMode(tilt,INPUT);//Set D13 pin to input mode 
+  pinMode(redPin, OUTPUT);//Set the D5 pin to output mode
+  pinMode(greenPin, OUTPUT);//Set the D6 pin to output mode
   digitalWrite(laserPin, HIGH); // Turn on the lasers !
   delay(100);
   Serial.begin(9600);
+}
+
+void colorRG(int red, int green){
+  analogWrite(redPin,constrain(red,0,255));
+  analogWrite(greenPin,constrain(green,0,255));
 }
 
 void readInput()
@@ -219,13 +287,12 @@ void readInput()
   for (int i = 0; i < 3; ++i)
   {
     newState = digitalRead(buttonsPin[i]);
-    buttonsPressed[i] = newState && !buttonsHold[i];
-    buttonsHold[i] = newState;
+    buttonsPressed[i] = !newState && !buttonsHold[i]; // Buttons when pushed are == 0
+    buttonsHold[i] = !newState;
   }
 
   // Tilt state
   tilted = digitalRead(tilt);
-
 }
 
 void changeMode()
@@ -235,15 +302,24 @@ void changeMode()
     switch(mode) {
       case PWM :
         mode = SQUARE;
-        Timer1.attachInterrupt(timerIsrSquare);        
+        Timer1.attachInterrupt(timerIsrSquare);
+        colorRG(0, 255); // Pink
         break;
       case SQUARE :
         mode = STACCATO;
         Timer1.attachInterrupt(timerIsrSquare);
+        colorRG(255, 0); // Cyan
         break;
       case STACCATO :
+        mode = ARPEGGIATOR;
+        Timer1.attachInterrupt(timerIsrSquare);
+        arpeggiator.init(); // White
+        colorRG(0, 0);         
+        break;
+      case ARPEGGIATOR :
         mode = PWM;
-        Timer1.attachInterrupt(timerIsrPwm);        
+        Timer1.attachInterrupt(timerIsrPwm);
+        colorRG(255, 255); // Blue
         break;
       default :
         break;
@@ -260,6 +336,11 @@ void changeMode()
       squareGenerator[i].setPeriod(periods[currentScale][i]);
       pwmGenerator[i].setPeriod(periods[currentScale][i]);
     }
+  }
+
+  if (buttonsPressed[2])
+  {
+    arpeggiator.tempoInc();
   }
 }
 
@@ -297,6 +378,32 @@ void loopPwm()
   }
 }
 
+void loopArpeggiator()
+{
+  arpeggiator.counterInc();
+  arpeggiator.findNextToneToPlay();
+  if (arpeggiator.counter >= arpeggiator.tempo)
+  {
+    arpeggiator.counterReset();
+    if (arpeggiator.toneToPlay < 7)
+    {
+      arpeggiator.lastTonePlayed = arpeggiator.toneToPlay;
+      arpeggiator.tonePlayed[arpeggiator.toneToPlay] = 1;
+      squareGenerator[arpeggiator.toneToPlay].volume = 127 / (sizeof(squareGenerator) / sizeof(squareGenerator[0]));
+      arpeggiator.resetToneToPlay();
+    }
+  }
+  for (int i = 0; i < 7; ++i)
+  {
+    if (squareGenerator[i].volume > 0)
+      squareGenerator[i].volume--;
+    if (tilted)
+      squareGenerator[i].slidePeriod(periods[currentScale][i]/2); // Slide to octave up when tilted
+    else
+      squareGenerator[i].slidePeriod(periods[currentScale][i]);
+  }
+}
+
 void loop()
 {
   readInput();
@@ -309,8 +416,11 @@ void loop()
     case STACCATO :
       loopSquare();
       break;
+    case ARPEGGIATOR :
+      loopArpeggiator();
+      break;
     default :
-    break;
+      break;
   }
   delay(15);
 }
@@ -320,7 +430,7 @@ void loop()
 // --------------------------
 void timerIsrSquare()
 {
-  Timer1.setPwmDuty(beep,(((int) filterValue) + 128) << 2);
+  Timer1.setPwmDuty(beep, filterValue);
   totalValue = 0;
   for (int i = 0; i < 7; ++i)
   {
@@ -329,13 +439,12 @@ void timerIsrSquare()
   }
 
   // Add a simple 1st order filter to have a less harsh square sound
-  filterValue >>= 1;
-  filterValue = filterValue + totalValue >> 1;
+  filterValue = (filterValue >> 1) + (filterValue >> 2) + (((int) totalValue) + 128);
 }
 
 void timerIsrPwm()
 {
-  Timer1.setPwmDuty(beep,(((int) filterValue) + 128) << 2);
+  Timer1.setPwmDuty(beep, filterValue);
   totalValue = 0;
   for (int i = 0; i < 7; ++i)
   {
@@ -344,6 +453,5 @@ void timerIsrPwm()
   }
 
   // Add a simple 1st order filter to have a less harsh square sound
-  filterValue >>= 1;
-  filterValue = filterValue + totalValue >> 1;
+  filterValue = (filterValue >> 1) + (filterValue >> 2) + (((int) totalValue) + 128);
 }
