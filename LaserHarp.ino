@@ -1,11 +1,12 @@
 #include <TimerOne.h>
 
 int beep = 9;
-int tilt=13; // Tilt switch pin
+int tilt = 13; // Tilt switch pin
 int laserPin = 12; // The transistor that controls the laser on and off is connected to the D12 pin
 int sensi = 950; // Set the sensitivity of the laser string(tone) R1 pin
 const unsigned short int sampleRate = 20000;
 char totalValue = 0;
+char filterValue = 0;
 const int buttonsPin[3] =
 {
   2,
@@ -24,25 +25,41 @@ const int lasersPin[7] =
   7
 };
 
-const unsigned short int periods[7] =
+const unsigned char periods[2][7] =
 {
-  sampleRate / 380,
-  sampleRate / 445,
-  sampleRate / 505,
-  sampleRate / 590,
-  sampleRate / 668,
-  sampleRate / 745,
-  sampleRate / 880
+  {
+    // Guqin strings
+    sampleRate / 380,
+    sampleRate / 445,
+    sampleRate / 505,
+    sampleRate / 590,
+    sampleRate / 668,
+    sampleRate / 745,
+    sampleRate / 880
+  },
+  {
+    // A Blues scale
+    sampleRate / 445,
+    sampleRate / 505,
+    sampleRate / 590,
+    sampleRate / 620,
+    sampleRate / 668,
+    sampleRate / 745,
+    sampleRate / 880
+  },
 };
+
+const unsigned char scaleCount = sizeof(periods) / sizeof(periods[0]);
+unsigned char currentScale = 0;
 
 struct SquareGenerator
 {
-  unsigned short int period;
+  unsigned char period;
   char volume;
   char phase;
   char value;
-  unsigned short int counter;
-  void init(const unsigned short int newPeriod)
+  unsigned char counter;
+  void init(const unsigned char newPeriod)
   {
     volume = 0;
     value = 0;
@@ -67,19 +84,31 @@ struct SquareGenerator
     }
     return value;
   }
+  void setPeriod(unsigned char newPeriod)
+  {
+    period = newPeriod;
+  }
+  void slidePeriod(unsigned char targetPeriod)
+  {
+    if ( (targetPeriod >= period - 2) ||
+         (targetPeriod <= period + 1) )
+      period = targetPeriod; // Stable value: use exact period
+    else
+      period = period >> 1 + targetPeriod >> 1; // Slide using an approximate 1st order filter
+  }
 };
 
 struct PwmGenerator
 {
-  unsigned short int periodHigh;
-  unsigned short int periodLow;
+  unsigned char periodHigh;
+  unsigned char periodLow;
   char volume;
   char phase;
   char sweepPhase;
   char value;
-  unsigned short int counter;
-  const unsigned short int periodMin = 5;
-  void init(const unsigned short int newPeriod)
+  unsigned char counter;
+  const unsigned char periodMin = 5;
+  void init(const unsigned char newPeriod)
   {
     volume = 0;
     value = 0;
@@ -132,6 +161,12 @@ struct PwmGenerator
     }
     return value;
   }
+  void setPeriod(unsigned char newPeriod)
+  {
+    periodHigh = periodMin;
+    periodLow = newPeriod - periodMin;
+    sweepPhase = 0;
+  }
 };
 
 SquareGenerator squareGenerator[7];
@@ -148,8 +183,8 @@ void setup()
 {
   for (int i = 0; i < 7; ++i)
   {
-    squareGenerator[i].init(periods[i]);
-    pwmGenerator[i].init(periods[i]);
+    squareGenerator[i].init(periods[currentScale][i]);
+    pwmGenerator[i].init(periods[currentScale][i]);
   }
   for (int i = 0; i < 3; ++i)
     pinMode(buttonsPin[i], INPUT);
@@ -214,6 +249,18 @@ void changeMode()
         break;
     }
   }
+
+  if (buttonsPressed[1])
+  {
+    currentScale++;
+    if (currentScale >= scaleCount)
+      currentScale = 0;
+    for (int i = 0; i < 7; ++i)
+    {
+      squareGenerator[i].setPeriod(periods[currentScale][i]);
+      pwmGenerator[i].setPeriod(periods[currentScale][i]);
+    }
+  }
 }
 
 void loopSquare()
@@ -226,6 +273,11 @@ void loopSquare()
     else
       if (squareGenerator[i].volume > 0)
         squareGenerator[i].volume--;
+
+    if (tilted)
+      squareGenerator[i].slidePeriod(periods[currentScale][i]/2); // Slide to octave up when tilted
+    else
+      squareGenerator[i].slidePeriod(periods[currentScale][i]);
   }
 }
 
@@ -268,22 +320,30 @@ void loop()
 // --------------------------
 void timerIsrSquare()
 {
-  Timer1.setPwmDuty(beep,(((int) totalValue) + 128) << 2);
+  Timer1.setPwmDuty(beep,(((int) filterValue) + 128) << 2);
   totalValue = 0;
   for (int i = 0; i < 7; ++i)
   {
     squareGenerator[i].counterInc();
     totalValue += squareGenerator[i].getValue();
   }
+
+  // Add a simple 1st order filter to have a less harsh square sound
+  filterValue >>= 1;
+  filterValue = filterValue + totalValue >> 1;
 }
 
 void timerIsrPwm()
 {
-  Timer1.setPwmDuty(beep,(((int) totalValue) + 128) << 2);
+  Timer1.setPwmDuty(beep,(((int) filterValue) + 128) << 2);
   totalValue = 0;
   for (int i = 0; i < 7; ++i)
   {
     pwmGenerator[i].counterInc();
     totalValue += pwmGenerator[i].getValue();
   }
+
+  // Add a simple 1st order filter to have a less harsh square sound
+  filterValue >>= 1;
+  filterValue = filterValue + totalValue >> 1;
 }
