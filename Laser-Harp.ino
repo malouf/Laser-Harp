@@ -50,8 +50,8 @@ const unsigned char periods[2][7] =
     // A Blues scale
     sampleRate / 445,
     sampleRate / 505,
+    sampleRate / 540,    
     sampleRate / 590,
-    sampleRate / 620,
     sampleRate / 668,
     sampleRate / 745,
     sampleRate / 880
@@ -76,12 +76,9 @@ struct SquareGenerator
     period = newPeriod;
     counter = 0;
   }
-  void counterInc()
-  {
-    counter++;
-  }
   char getValue()
   {
+    counter++;
     if (counter >= period)
     {
       if (phase == 0)
@@ -96,14 +93,6 @@ struct SquareGenerator
   void setPeriod(unsigned char newPeriod)
   {
     period = newPeriod;
-  }
-  void slidePeriod(unsigned char targetPeriod)
-  {
-    if ( (targetPeriod >= period - 2) ||
-         (targetPeriod <= period + 1) )
-      period = targetPeriod; // Stable value: use exact period
-    else
-      period = period >> 1 + targetPeriod >> 1; // Slide using an approximate 1st order filter
   }
 };
 
@@ -144,12 +133,9 @@ struct PwmGenerator
         sweepPhase = 0;
     }
   }
-  void counterInc()
-  {
-    counter++;
-  }
   char getValue()
   {
+    counter++;
     if (phase == 0)
     {
       if (counter >= periodHigh)
@@ -178,76 +164,78 @@ struct PwmGenerator
   }
 };
 
+SquareGenerator squareGenerator[7];
+PwmGenerator pwmGenerator[7];
+
 struct Arpeggiator
 {
-  unsigned short int counter;
-  unsigned short int tempo;
-  unsigned short int lastTonePlayed;
-  unsigned short int toneToPlay;
-  char tonePlayed[7];
-  void resetToneToPlay() { toneToPlay = 10; }
-  void resetTonePlayed()
-  {
-    for (int i = 0; i < 7; ++i)
-      tonePlayed[i] = 0;
-    lastTonePlayed = 0;
-  }
+  unsigned char counter;
+  unsigned char tempo;
+  unsigned char toneToPlay;
+  const unsigned char tempoMin = 14;
   void findNextToneToPlay()
   {
     // if mode == going up
-    for (int i = lastTonePlayed; i < 7; ++i)
+    for (char i = toneToPlay + 1; i < 7; ++i)
     {
-      if (lasersHold[i] && !tonePlayed[i])
+      if (lasersHold[i])
       {
         toneToPlay = i;
-        break;
+        return;
       }
     }
-    for (int i = lastTonePlayed; i < 7; ++i)
+    for (char i = 0; i < 7; ++i)
     {
-      if (lasersHold[i] && !tonePlayed[i])
-        break;
-      if (i + 1 == 7)
-        resetTonePlayed();
+      if (lasersHold[i])
+      {
+        toneToPlay = i;
+        return;
+      }
     }
+    toneToPlay = 7;
   }
-  void setTempo(unsigned char newTempo) {tempo = newTempo;}
+  bool nextBeat()
+  {
+    counter++;
+    if (counter > tempo)
+    {
+      counter = 0;
+      return true;
+    }
+    return false;
+  }
   void tempoInc()
   {
     tempo++;
-    if (tempo >= 20)
+    if (tempo >= tempoMin)
       tempo = 7;
   }
-  void counterInc() {counter++;}
-  void counterReset() {counter = 0;}
   void init()
   {
     counter = 0;
     tempo = 7;
-    resetTonePlayed();
-    resetToneToPlay();
+    toneToPlay = 7;
+    for (char i = 0; i < 7; ++i)
+      squareGenerator[i].volume = 0;
   }
 };
 
-SquareGenerator squareGenerator[7];
-PwmGenerator pwmGenerator[7];
 Arpeggiator arpeggiator;
 Modes mode;
 
 void setup()
 {
-  for (int i = 0; i < 7; ++i)
+  for (char i = 0; i < 7; ++i)
   {
     squareGenerator[i].init(periods[currentScale][i]);
     pwmGenerator[i].init(periods[currentScale][i]);
   }
-  for (int i = 0; i < 3; ++i)
+  for (char i = 0; i < 3; ++i)
   {
     pinMode(buttonsPin[i], INPUT);
     buttonsPressed[i] = 0;
     buttonsHold[i] = 0;
   }
-  arpeggiator.init();
   mode = PWM;
   colorRG(255, 255); // Blue
   Timer1.initialize(50); // initialize timer1 10KHz
@@ -260,10 +248,9 @@ void setup()
   pinMode(greenPin, OUTPUT);//Set the D6 pin to output mode
   digitalWrite(laserPin, HIGH); // Turn on the lasers !
   delay(100);
-  Serial.begin(9600);
 }
 
-void colorRG(int red, int green){
+void colorRG(unsigned char red, unsigned char green){
   analogWrite(redPin,constrain(red,0,255));
   analogWrite(greenPin,constrain(green,0,255));
 }
@@ -272,7 +259,7 @@ void readInput()
 {
   char newState;
   // Lasers state
-  for (int i = 0; i < 6; ++i)
+  for (char i = 0; i < 6; ++i)
   {
     newState = analogRead(lasersPin[i]) < sensi;
     lasersPressed[i] = newState && !lasersHold[i];
@@ -284,7 +271,7 @@ void readInput()
   lasersHold[6] = newState;
 
   // Buttons state
-  for (int i = 0; i < 3; ++i)
+  for (char i = 0; i < 3; ++i)
   {
     newState = digitalRead(buttonsPin[i]);
     buttonsPressed[i] = !newState && !buttonsHold[i]; // Buttons when pushed are == 0
@@ -331,7 +318,7 @@ void changeMode()
     currentScale++;
     if (currentScale >= scaleCount)
       currentScale = 0;
-    for (int i = 0; i < 7; ++i)
+    for (char i = 0; i < 7; ++i)
     {
       squareGenerator[i].setPeriod(periods[currentScale][i]);
       pwmGenerator[i].setPeriod(periods[currentScale][i]);
@@ -346,7 +333,7 @@ void changeMode()
 
 void loopSquare()
 {
-  for (int i = 0; i < 7; ++i)
+  for (char i = 0; i < 7; ++i)
   {
     if ( (lasersHold[i] && mode == SQUARE) ||
          (lasersPressed[i] && mode == STACCATO) )
@@ -354,17 +341,12 @@ void loopSquare()
     else
       if (squareGenerator[i].volume > 0)
         squareGenerator[i].volume--;
-
-    if (tilted)
-      squareGenerator[i].slidePeriod(periods[currentScale][i]/2); // Slide to octave up when tilted
-    else
-      squareGenerator[i].slidePeriod(periods[currentScale][i]);
   }
 }
 
 void loopPwm()
 {
-  for (int i = 0; i < 7; ++i)
+  for (char i = 0; i < 7; ++i)
   {
     pwmGenerator[i].pwmSweep();
     if (lasersHold[i])
@@ -380,28 +362,17 @@ void loopPwm()
 
 void loopArpeggiator()
 {
-  arpeggiator.counterInc();
-  arpeggiator.findNextToneToPlay();
-  if (arpeggiator.counter >= arpeggiator.tempo)
+  if (arpeggiator.nextBeat())
   {
-    arpeggiator.counterReset();
+    arpeggiator.findNextToneToPlay();
     if (arpeggiator.toneToPlay < 7)
     {
-      arpeggiator.lastTonePlayed = arpeggiator.toneToPlay;
-      arpeggiator.tonePlayed[arpeggiator.toneToPlay] = 1;
-      squareGenerator[arpeggiator.toneToPlay].volume = 127 / (sizeof(squareGenerator) / sizeof(squareGenerator[0]));
-      arpeggiator.resetToneToPlay();
+      squareGenerator[0].setPeriod(periods[currentScale][arpeggiator.toneToPlay]);
+      squareGenerator[0].volume = 127 / (sizeof(squareGenerator) / sizeof(squareGenerator[0]));
     }
   }
-  for (int i = 0; i < 7; ++i)
-  {
-    if (squareGenerator[i].volume > 0)
-      squareGenerator[i].volume--;
-    if (tilted)
-      squareGenerator[i].slidePeriod(periods[currentScale][i]/2); // Slide to octave up when tilted
-    else
-      squareGenerator[i].slidePeriod(periods[currentScale][i]);
-  }
+  if (squareGenerator[0].volume > 0)
+    squareGenerator[0].volume--;    
 }
 
 void loop()
@@ -432,26 +403,20 @@ void timerIsrSquare()
 {
   Timer1.setPwmDuty(beep, filterValue);
   totalValue = 0;
-  for (int i = 0; i < 7; ++i)
-  {
-    squareGenerator[i].counterInc();
+  for (char i = 0; i < 7; ++i)
     totalValue += squareGenerator[i].getValue();
-  }
 
   // Add a simple 1st order filter to have a less harsh square sound
-  filterValue = (filterValue >> 1) + (filterValue >> 2) + (((int) totalValue) + 128);
+  filterValue = (((int) totalValue) + 128) << 2;
 }
 
 void timerIsrPwm()
 {
   Timer1.setPwmDuty(beep, filterValue);
   totalValue = 0;
-  for (int i = 0; i < 7; ++i)
-  {
-    pwmGenerator[i].counterInc();
+  for (char i = 0; i < 7; ++i)
     totalValue += pwmGenerator[i].getValue();
-  }
 
   // Add a simple 1st order filter to have a less harsh square sound
-  filterValue = (filterValue >> 1) + (filterValue >> 2) + (((int) totalValue) + 128);
+  filterValue = (((int) totalValue) + 128) << 2;
 }
