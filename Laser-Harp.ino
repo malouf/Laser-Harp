@@ -6,7 +6,7 @@ int beep = 9;
 int tilt = 13; // Tilt switch pin
 int laserPin = 12; // The transistor that controls the laser on and off is connected to the D12 pin
 int sensi = 950; // Set the sensitivity of the laser string(tone) R1 pin
-const unsigned short int sampleRate = 20000;
+const unsigned short int sampleRate = 33000;
 char totalValue = 0;
 short int filterValue = 512;
 char lasersPressed[7];
@@ -34,26 +34,36 @@ const int lasersPin[7] =
   7
 };
 
-const unsigned char periods[2][7] =
+const unsigned char periods[][7] =
 {
   {
+    // A major scale
+    sampleRate / 220,
+    sampleRate / 247,
+    sampleRate / 262,
+    sampleRate / 294,
+    sampleRate / 330,
+    sampleRate / 349,
+    sampleRate / 392
+  },
+  {
     // Guqin strings
-    sampleRate / 380,
-    sampleRate / 445,
-    sampleRate / 505,
-    sampleRate / 590,
-    sampleRate / 668,
-    sampleRate / 745,
+    sampleRate / 370,
+    sampleRate / 440,
+    sampleRate / 494,
+    sampleRate / 587,
+    sampleRate / 659,
+    sampleRate / 740,
     sampleRate / 880
   },
   {
     // A Blues scale
-    sampleRate / 445,
-    sampleRate / 505,
-    sampleRate / 540,    
-    sampleRate / 590,
-    sampleRate / 668,
-    sampleRate / 745,
+    sampleRate / 440,
+    sampleRate / 494,
+    sampleRate / 587,
+    sampleRate / 659,
+    sampleRate / 698,
+    sampleRate / 740,
     sampleRate / 880
   },
 };
@@ -238,7 +248,7 @@ void setup()
   }
   mode = PWM;
   colorRG(255, 255); // Blue
-  Timer1.initialize(50); // initialize timer1 10KHz
+  Timer1.initialize(1000000 / sampleRate); // initialize timer1 20KHz
   Timer1.pwm(beep, 512); // setup pwm on pin 9
   Timer1.attachInterrupt(timerIsrPwm); // attaches timerIsr() as a timer overflow interrupt
   pinMode(7, INPUT); // Set the laser D7 pin to input mode
